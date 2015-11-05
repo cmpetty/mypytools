@@ -1,6 +1,21 @@
 #!/usr/bin/python
 # -*- coding: iso-8859-1 -*-
 
+"""
+ This program is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation, either version 3 of the License, or
+    (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+"""
+
 import numpy as np
 import numpy.ma
 import nibabel
@@ -186,6 +201,9 @@ class RestPipe:
         #grab TR if it needs to be forced
         self.tr_ms = options.tr_ms
 
+        #set a basedir where this file is located
+        self.basedir = re.sub('\/bin','',os.path.dirname(os.path.realpath(__file__)))
+
         #reference image for normalization
         if options.flirtref is not None:
             for fname in [options.refwm, options.refcsf, options.flirtref, options.refbrainmask]:
@@ -207,9 +225,12 @@ class RestPipe:
             self.refbrainmask = str(options.refbrainmask)
         else:
             self.flirtref = os.path.join(os.environ['FSLDIR'],'data','standard','MNI152_T1_2mm_brain.nii.gz')
-            self.refwm = os.path.join(os.environ['FSLDIR'],'data','standard','MNI152_T1_2mm_brain_pve_2.nii.gz')
-            self.refcsf = os.path.join(os.environ['FSLDIR'],'data','standard','MNI152_T1_2mm_brain_pve_0.nii.gz')
-            self.refgm = os.path.join(os.environ['FSLDIR'],'data','standard','MNI152_T1_2mm_brain_pve_1.nii.gz')
+            #self.refwm = os.path.join(os.environ['FSLDIR'],'data','standard','MNI152_T1_2mm_brain_pve_2.nii.gz')
+            #self.refcsf = os.path.join(os.environ['FSLDIR'],'data','standard','MNI152_T1_2mm_brain_pve_0.nii.gz')
+            #self.refgm = os.path.join(os.environ['FSLDIR'],'data','standard','MNI152_T1_2mm_brain_pve_1.nii.gz')
+            self.refwm = os.path.join(self.basedir,'data','MNI152_T1_2mm_brain_pve_2.nii.gz')
+            self.refcsf = os.path.join(self.basedir,'data','MNI152_T1_2mm_brain_pve_0.nii.gz')
+            self.refgm = os.path.join(self.basedir,'data','MNI152_T1_2mm_brain_pve_1.nii.gz')
             self.refac = str(options.refac)  
             self.refbrainmask = os.path.join(os.environ['FSLDIR'],'data','standard','MNI152_T1_2mm_brain_mask.nii.gz')
 
@@ -242,9 +263,9 @@ class RestPipe:
                 self.corrlabel = str(options.corrlabel)
                 self.corrtext  = str(options.corrtext)
         else:
-            self.corrlabel = os.path.join('/usr','local','packages','MATLAB','WFU_PickAtlas_3.0.1','wfu_pickatlas','MNI_atlas_templates','aal_MNI_V4.nii')
-            self.corrtext = os.path.join('/usr','local','packages','MATLAB','WFU_PickAtlas_3.0.1','wfu_pickatlas','MNI_atlas_templates','aal_MNI_V4.txt')
-            
+            self.corrlabel = os.path.join(self.basedir,'data','aal_MNI_V4.nii')
+            self.corrtext = os.path.join(self.basedir,'data','aal_MNI_V4.txt')
+
         #a pre-defined flirt matrix for normalization
         if options.flirtmat is not None:
             if not ( os.path.isfile(options.flirtmat) ):
@@ -1206,9 +1227,12 @@ class RestPipe:
             logging.info(' marking these volumes due to DVARS > %g: %s', _dvarsthreshold * boldscaling, excludethese)            
             for excludethis in excludethese:
                 numexcls[excludethis] += 1
-            with open(dvarsmarkedvolstxt, 'w') as f:
-                f.write("# these are the volumes (indexed starting at 0) marked as exceeding the 'DVARS' threshold of %s\n" % self.dvarsthreshold)
-                np.savetxt(f, np.transpose(numpy.array(excludethese)), fmt='%d', newline=' ')
+            #with open(dvarsmarkedvolstxt, 'w') as f:
+            f = open(dvarsmarkedvolstxt, 'w')
+            f.write("# these are the volumes (indexed starting at 0) marked as exceeding the 'DVARS' threshold of %s\n" % self.dvarsthreshold)
+            np.savetxt(f, np.transpose(numpy.array(excludethese)), fmt='%d', newline=' ')
+            f.close()
+            
             np.savetxt(dvarstxt, dvars, fmt='%g')
             np.savetxt(dvarspercenttxt, dvars / boldscaling, fmt='%g')
             np.savetxt(dvarsthreshtxt, [_dvarsthreshold * boldscaling], fmt='%f')
@@ -1239,9 +1263,11 @@ class RestPipe:
             logging.info(' marking these volumes due to FD > %g mm: %s', self.fdthreshold, excludethese)            
             for excludethis in excludethese:
                 numexcls[excludethis] += 1
-            with open(fdmarkedvolstxt, 'w') as f:
-                f.write("# these are the volumes (indexed starting at 0) marked as exceeding the 'FD' threshold of %g mm\n" % self.fdthreshold)
-                np.savetxt(f, np.transpose(numpy.array(excludethese)), fmt='%d', newline=' ')
+            #with open(fdmarkedvolstxt, 'w') as f:
+            f = open(fdmarkedvolstxt, 'w')
+            f.write("# these are the volumes (indexed starting at 0) marked as exceeding the 'FD' threshold of %g mm\n" % self.fdthreshold)
+            np.savetxt(f, np.transpose(numpy.array(excludethese)), fmt='%d', newline=' ')
+            f.close()
             np.savetxt(fdtxt, FD, fmt='%g')
 
         if self.motionthreshold != None:
@@ -1374,9 +1400,11 @@ class RestPipe:
             logging.info(' marking these volumes due to motion > %g mm: %s', self.motionthreshold, excludethese)
             for excludethis in excludethese:
                 numexcls[excludethis] += 1
-            with open(motionmarkedvolstxt, 'w') as f:
-                f.write("# these are the volumes (indexed starting at 0) marked as exceeding the 'motion' threshold of %g\n" % self.motionthreshold)
-                np.savetxt(f, numpy.array(excludethese)[:,np.newaxis], fmt='%d', newline=' ')
+            #with open(motionmarkedvolstxt, 'w') as f:
+            f = open(motionmarkedvolstxt, 'w')
+            f.write("# these are the volumes (indexed starting at 0) marked as exceeding the 'motion' threshold of %g\n" % self.motionthreshold)
+            np.savetxt(f, numpy.array(excludethese)[:,np.newaxis], fmt='%d', newline=' ')
+            f.close()
             np.savetxt(motiontxt, maxdisplacements, fmt='%g')
 
         if self.scrubop == 'and':
@@ -1399,9 +1427,12 @@ class RestPipe:
                 ([], ["'FD'"])[self.fdthreshold is not None] +
                 ([], ["'motion'"])[self.motionthreshold is not None])
             logging.info('Scrubbed the following volumes because they or their neighbors exceeded the %s threshold (first volume is 0): %s' % (scrubmethodstr, str(excludedinds[0])))
-            with open(excludedvolstxt, 'w') as f:
-                f.write("# these are the volumes (indexed starting at 0) excluded because they or their neighbors exceeded the %s threshold\n" % scrubmethodstr)
-                np.savetxt(f, np.transpose(excludedinds[0]), fmt='%d', newline=' ')
+            #with open(excludedvolstxt, 'w') as f:
+            f = open(excludedvolstxt, 'w')
+            f.write("# these are the volumes (indexed starting at 0) excluded because they or their neighbors exceeded the %s threshold\n" % scrubmethodstr)
+            np.savetxt(f, np.transpose(excludedinds[0]), fmt='%d', newline=' ')
+            f.close()
+
         if self.scrubkeepminvols != None and timeseries.shape[1] < self.scrubkeepminvols:
             logging.error('Too few volumes (%d) met the scrubbing threshold!  Exiting...' % (timeseries.shape[1],))
             raise SystemExit()
