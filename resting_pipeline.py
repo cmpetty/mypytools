@@ -1,21 +1,6 @@
 #!/usr/bin/python
 # -*- coding: iso-8859-1 -*-
 
-"""
- This program is free software: you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation, either version 3 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program.  If not, see <http://www.gnu.org/licenses/>.
-"""
-
 import numpy as np
 import numpy.ma
 import nibabel
@@ -65,6 +50,7 @@ parser.add_option("-o","--outpath",  action="store",type="string", dest="outpath
 parser.add_option("--sliceorder",  action="store",type="string", dest="sliceorder",help="sliceorder if slicetime correction ( odd=interleaved (1,3,5,2,4,6), up=ascending, down=descending, even=interleaved (2,4,6,1,3,5) ).  Default is to read this from input image, if available.", metavar="string")
 parser.add_option("--tr",  action="store", type="float", dest="tr_ms",help="TR of functional data in MSEC", metavar="MSEC")
 parser.add_option("--ref",  action="store", type="string", dest="flirtref",help="pointer to FLIRT reference image if not using standard brain", metavar="FILE")
+parser.add_option("--flirtdof",  action="store", type="int", dest="flirtdof",help="How many degrees-of-freedom for FLIRT to use when registering T1 (anatomical) to reference image (default is 12).  Registering functional to anatomical always uses 6 dof.", metavar="NUM")
 parser.add_option("--flirtmat",  action="store", type="string", dest="flirtmat",help="a pre-defined flirt matrix to apply to your functional data. (ie: func2standard.mat)", metavar="FILE")
 parser.add_option("--refwm",  action="store", type="string", dest="refwm",help="pointer to WM mask of reference image if not using standard brain", metavar="FILE")
 parser.add_option("--refcsf",  action="store", type="string", dest="refcsf",help="pointer to CSF mask of reference image if not using standard brain", metavar="FILE")
@@ -90,7 +76,7 @@ parser.add_option("--scrubkeepminvols",  action="store", type="int", dest="scrub
 parser.add_option("--fcdmthresh",  action="store", type="float", dest="fcdmthresh",help="R-value threshold to be used in functional connectivity density mapping ( step8 ). Default is set to 0.6. Algorithm from Tomasi et al, PNAS(2010), vol. 107, no. 21. Calculates the fcdm of functional data from last completed step, inside a dilated gray matter mask", metavar="THRESH", default=0.6)
 parser.add_option("--cleanup",  action="store_true", dest="cleanup",help="delete files from intermediate steps?")
 
-
+print "Command-line: " + " ".join([repr(x) for x in sys.argv])
 
 options, args = parser.parse_args()
 
@@ -142,7 +128,7 @@ class RestPipe:
     def initialize(self):
          #if all was defined, set those steps
         if (options.steps == 'all'):
-            self.steps = ['0','1','2','3','4','5','6','7','8']
+            self.steps = ['0','1','2','3','4','5','6','7']
         else:
             #convert unicode str, push into obj
             self.steps = options.steps.split(',')
@@ -177,8 +163,16 @@ class RestPipe:
                 elif fileExt == '.gz' or fileExt == '.nii':
                     self.t1nii = str(options.anatfile)
                     thisproc = subprocess.Popen(["fslwrapbxh " + self.t1nii],shell=True).wait()
-                    if os.path.isfile(self.t1nii.split('.')[0] + '.nii.gz'):
-                        self.t1bxh = self.t1nii.split('.')[0] + '.nii.gz'
+                    extInd = None
+                    if self.t1nii[-4:] == '.nii':
+                        extInd = -4
+                    elif self.t1nii[-7:] == '.nii.gz':
+                        extInd = -7
+                    else:
+                        raise SystemExit("File does not have correct extension: %s" % (self.t1nii,))
+                    self.t1bxh = self.t1nii[0:extInd] + '.bxh'
+                    if not os.path.isfile(self.t1bxh):
+                        raise SystemExit("Could not create .bxh file for %s" % (self.t1nii,))
 
 
         if options.prefix is not None:
@@ -204,6 +198,11 @@ class RestPipe:
         #set a basedir where this file is located
         self.basedir = re.sub('\/bin','',os.path.dirname(os.path.realpath(__file__)))
 
+        if options.flirtdof is not None:
+            self.flirtdof = str(options.flirtdof)
+        else:
+            self.flirtdof = str(12)
+
         #reference image for normalization
         if options.flirtref is not None:
             for fname in [options.refwm, options.refcsf, options.flirtref, options.refbrainmask]:
@@ -221,26 +220,27 @@ class RestPipe:
             self.refwm = str(options.refwm)
             self.refcsf = str(options.refcsf)
             self.refgm = str(options.refgm)
-            self.refac = str(options.refac)  
+            self.refac = str(options.refac)
             self.refbrainmask = str(options.refbrainmask)
         else:
             self.flirtref = os.path.join(os.environ['FSLDIR'],'data','standard','MNI152_T1_2mm_brain.nii.gz')
-            #self.refwm = os.path.join(os.environ['FSLDIR'],'data','standard','MNI152_T1_2mm_brain_pve_2.nii.gz')
-            #self.refcsf = os.path.join(os.environ['FSLDIR'],'data','standard','MNI152_T1_2mm_brain_pve_0.nii.gz')
-            #self.refgm = os.path.join(os.environ['FSLDIR'],'data','standard','MNI152_T1_2mm_brain_pve_1.nii.gz')
+            # self.refwm = os.path.join(os.environ['FSLDIR'],'data','standard','MNI152_T1_2mm_brain_pve_2.nii.gz')
+            # self.refcsf = os.path.join(os.environ['FSLDIR'],'data','standard','MNI152_T1_2mm_brain_pve_0.nii.gz')
+            # self.refgm = os.path.join(os.environ['FSLDIR'],'data','standard','MNI152_T1_2mm_brain_pve_1.nii.gz')
             self.refwm = os.path.join(self.basedir,'data','MNI152_T1_2mm_brain_pve_2.nii.gz')
             self.refcsf = os.path.join(self.basedir,'data','MNI152_T1_2mm_brain_pve_0.nii.gz')
             self.refgm = os.path.join(self.basedir,'data','MNI152_T1_2mm_brain_pve_1.nii.gz')
-            self.refac = str(options.refac)  
+
+            self.refac = str(options.refac)
             self.refbrainmask = os.path.join(os.environ['FSLDIR'],'data','standard','MNI152_T1_2mm_brain_mask.nii.gz')
 
         if ( '0' in self.steps ) and (self.origbxh is None) and ( self.thisnii is not None ):
-            if self.tr_ms is not None:                
+            if self.tr_ms is not None:
                 logging.info('requesting step0, but no bxh provided.  Creating one from ' + self.thisnii )
                 thisproc = subprocess.Popen(["fslwrapbxh " + self.thisnii],shell=True).wait()
 
                 tmpfname = re.split('(\.nii$|\.nii\.gz$)',self.thisnii)[0] + ".bxh"
-    
+
                 if os.path.isfile( tmpfname ):
                     self.origbxh = tmpfname
                 else:
@@ -253,18 +253,22 @@ class RestPipe:
 
         #grab correlation label, or assign the AAL brain
         if options.corrlabel is not None:
+            if options.corrtext is None:
+                raise SystemExit("If --corrlabel is specified, --corrtext must also be specified.")
             if not ( os.path.isfile(options.corrlabel) ):
                 print "File does not exist: " + options.corrlabel
                 raise SystemExit()
             elif not ( os.path.isfile(options.corrtext) ):
                 print "File does not exist: " + options.corrtext
-                raise SystemExit()            
+                raise SystemExit()
             else:
                 self.corrlabel = str(options.corrlabel)
                 self.corrtext  = str(options.corrtext)
         else:
             self.corrlabel = os.path.join(self.basedir,'data','aal_MNI_V4.nii')
             self.corrtext = os.path.join(self.basedir,'data','aal_MNI_V4.txt')
+            # self.corrlabel = os.path.join('/usr','local','packages','MATLAB','WFU_PickAtlas_3.0.1','wfu_pickatlas','MNI_atlas_templates','aal_MNI_V4.nii')
+            # self.corrtext = os.path.join('/usr','local','packages','MATLAB','WFU_PickAtlas_3.0.1','wfu_pickatlas','MNI_atlas_templates','aal_MNI_V4.txt')
 
         #a pre-defined flirt matrix for normalization
         if options.flirtmat is not None:
@@ -342,7 +346,7 @@ class RestPipe:
         #self.sliceorder = None
         self.xdim = None
         self.ydim = None
-        self.zdim = None    
+        self.zdim = None
         self.tdim = None
         #self.thisnii = None
         self.prevprefix = None
@@ -452,7 +456,7 @@ class RestPipe:
 
         #if they are skipping 0, make sure there's NII data
         if '0' not in self.steps and self.needfunc:
-            if self.thisnii is None:                
+            if self.thisnii is None:
                 newfile = os.path.join(self.outpath,self.prefix)
                 thisprocstr = str("bxh2analyze --overwrite --niigz -s " + self.origbxh + " " + newfile)
                 subprocess.Popen(thisprocstr,shell=True).wait()
@@ -484,7 +488,7 @@ class RestPipe:
             elif options.sliceorder:
                 #try to generate a slicefile if it wasn't in BXH
                 if (re.search('(odd|even|up|down)',options.sliceorder)) and (self.slicefile is None):
-                    self.sliceorder = options.sliceorder                    
+                    self.sliceorder = options.sliceorder
                     if self.zdim is not None:
                         slicefile = os.path.join(self.outpath,'sliceorder.txt')
                         f = open(slicefile, 'w')
@@ -493,7 +497,7 @@ class RestPipe:
                             for i in thisrang:
                                 f.write(str(i))
                                 f.write("\n")
-                            
+
                             f.close()
                             self.slicefile = slicefile
                         elif self.sliceorder == 'down': #topdown
@@ -502,7 +506,7 @@ class RestPipe:
                             for i in thisrang:
                                 f.write(str(i))
                                 f.write("\n")
-                            
+
                             f.close()
                             self.slicefile = slicefile
                         elif re.search('(odd|even)',self.sliceorder):  #interleaved
@@ -552,7 +556,7 @@ class RestPipe:
                 if not os.path.isfile(corrtsfile):
                     print "You are running step 7b by itself, but can't find default input file '%s'.  Please specify an alternate file with --corrts." % (corrtsfile,)
                     raise SystemExit()
-        
+
 
     #get the labels from the text file
     def grab_labels(self):
@@ -568,8 +572,8 @@ class RestPipe:
 
         return labs
 
-     
-    #step0 is the initial LAS conversion and nifti creation    
+
+    #step0 is the initial LAS conversion and nifti creation
     def step0(self):
         logging.info('converting functional data')
         tempfile = os.path.join(self.tmpdir,''.join(random.choice(string.ascii_uppercase + string.digits) for x in range(10)) + '.bxh')
@@ -593,7 +597,7 @@ class RestPipe:
             if os.path.isfile(newfile + ".nii.gz"):
                 self.thisnii = newfile + ".nii.gz"
                 self.prevprefix = self.prefix
-                self.prefix = newprefix                 
+                self.prefix = newprefix
             else:
                 logging.info('conversion failed')
                 raise SystemExit()
@@ -621,11 +625,11 @@ class RestPipe:
         logging.info('slice time correcting data')
         newprefix = self.prefix + '_st'
         newfile = os.path.join(self.outpath,newprefix)
-        
+
         thisprocstr = str("slicetimer -i " + self.thisnii + " -o " + newfile + " -r " +  str(self.tr_ms/1000) + " --ocustom=" + self.slicefile)
         logging.info('running: ' + thisprocstr)
         subprocess.Popen(thisprocstr,shell=True).wait()
-        
+
         if os.path.isfile(newfile + ".nii.gz"):
             if self.prevprefix is not None:
                 self.toclean.append( self.thisnii )
@@ -642,7 +646,7 @@ class RestPipe:
         logging.info('motion correcting correcting data')
         newprefix = self.prefix + '_mcf'
         newfile = os.path.join(self.outpath,newprefix)
-        
+
         thisprocstr = str("mcflirt -in " + self.thisnii + " -o " + newfile + " -plots")
         logging.info('running: ' + thisprocstr)
         subprocess.Popen(thisprocstr,shell=True).wait()
@@ -653,7 +657,7 @@ class RestPipe:
             self.thisnii = newfile + ".nii.gz"
             self.prevprefix = self.prefix
             self.prefix = newprefix
-            self.mcparams = newfile + ".par"             
+            self.mcparams = newfile + ".par"
             logging.info('motion correction successful: ' + self.thisnii )
 
             thisprocstr = str("fsl_tsplot -i " + self.mcparams +  " -t 'MCFLIRT estimated rotations (radians)' -u 1 --start=1 --finish=3 -a x,y,z -w 640 -h 144 -o " + newfile + "_rot.png")
@@ -675,7 +679,7 @@ class RestPipe:
             X = []
             for index in range(6):
                 X.append(np.vstack([np.ones(self.tdim), params[index]]).T)
-            
+
             logging.info('starting linear regression')
             tmp_mean = np.mean(data1, axis=3)
             shape = data1.shape
@@ -757,7 +761,7 @@ class RestPipe:
             thisprocstr = str("bet " + self.t1nii + " " + newfile + " -f " + str(self.anatbetfval))
             logging.info('running: ' + thisprocstr)
             subprocess.Popen(thisprocstr,shell=True).wait()
-        
+
             if os.path.isfile( newfile + ".nii.gz" ):
                 self.t1nii = newfile + ".nii.gz"
                 logging.info('skull stripping completed: ' + self.t1nii )
@@ -770,7 +774,7 @@ class RestPipe:
     def step4(self):
         logging.info('normalizing data')
         newprefix = self.prefix + "_norm"
-        newfile = os.path.join(self.outpath, newprefix)           
+        newfile = os.path.join(self.outpath, newprefix)
 
         if self.flirtmat is not None:
             #apply the flirt matrix
@@ -795,11 +799,11 @@ class RestPipe:
 
             #flirt the t1 to standard
             logging.info('flirt t1 to standard')
-            thisprocstr = str("flirt -ref " + self.flirtref + " -in " + self.t1nii + " -out " + os.path.join(self.outpath,'t12standard') + " -omat " + os.path.join(self.outpath,'t12standard.mat') + " -cost corratio -dof 12 -searchrx -90 90 -searchry -90 90 -searchrz -90 90 -interp trilinear")
+            thisprocstr = str("flirt -ref " + self.flirtref + " -in " + self.t1nii + " -out " + os.path.join(self.outpath,'t12standard') + " -omat " + os.path.join(self.outpath,'t12standard.mat') + " -cost corratio -dof " + self.flirtdof + " -searchrx -90 90 -searchry -90 90 -searchrz -90 90 -interp trilinear")
             logging.info('running: ' + thisprocstr)
             subprocess.Popen(thisprocstr,shell=True).wait()
             if os.path.isfile(os.path.join(self.outpath,('t12standard' + '.nii.gz'))):
-                self.t1nii = os.path.join(self.outpath,('t12standard' + '.nii.gz'))   
+                self.t1nii = os.path.join(self.outpath,('t12standard' + '.nii.gz'))
             else:
                 logging.info('t1 normalization failed.')
                 raise SystemExit()
@@ -823,7 +827,7 @@ class RestPipe:
             logging.info('running: ' + thisprocstr)
             subprocess.Popen(thisprocstr,shell=True).wait()
 
-           
+
         else:
             #use the functional to get the matrix
             thisprocstr = str("flirt -in " +  self.thisnii + " -ref " + self.flirtref + " -out " + newfile + " -omat " + (newfile + '.mat') + " -bins 256 -cost corratio -searchrx -90 90 -searchry -90 90 -searchrz -90 90 -dof 12 -interp trilinear")
@@ -939,8 +943,8 @@ class RestPipe:
         logging.info('lowpass filtering data')
         newprefix = "filt_" + self.prefix
         newfile = os.path.join(self.outpath,(newprefix + ".nii.gz"))
-  
-        freq_cutoff = self.lpfreq        
+
+        freq_cutoff = self.lpfreq
 
         #load nifti data
         data = nibabel.nifti1.load(self.thisnii)
@@ -948,7 +952,7 @@ class RestPipe:
 
         #build filter
         time_all = np.arange(0,(self.tdim*(self.tr_ms/1000))-.001,.001)
-        time_subTR = time_all[0:-1:self.tr_ms]
+        time_subTR = time_all[0:-1:int(self.tr_ms)]
         length = len(time_subTR)
         ccc = 1.0/(self.tr_ms/1000)/length
         cccc = freq_cutoff/ccc
@@ -956,16 +960,16 @@ class RestPipe:
         len2 = round(length/2.0+(cccc+1))
 
         tmp = np.zeros([self.tdim,1])
-        tmp[len1:len2]=1
+        tmp[int(len1):int(len2)]=1
         tmpMA = len1-4
         tmpMA2 = round(tmpMA/2)
         tmpAB = np.divide(np.add(1,np.cos(np.arange(np.pi, 2*np.pi+((np.pi/tmpMA)/2), np.pi/tmpMA))),2)
         tmpAB = tmpAB.reshape(tmpAB.shape[0],1)
         tmpBA = np.divide(np.add(1,np.cos(np.arange(2*np.pi,np.pi-((np.pi/tmpMA)/2), -np.pi/tmpMA))),2)
         tmpBA = tmpBA.reshape(tmpBA.shape[0],1)
-        
-        tmp[(len1-tmpMA+tmpMA2)-1:len1+tmpMA2]=tmpAB
-        tmp[(len2-tmpMA2)-1:len2+tmpMA-tmpMA2]=tmpBA
+
+        tmp[int((len1-tmpMA+tmpMA2)-1):int(len1+tmpMA2)]=tmpAB
+        tmp[int((len2-tmpMA2)-1):int(len2+tmpMA-tmpMA2)]=tmpBA
 
         tmp_mean = np.mean(data1, axis=3)
         # go slice-by-slice
@@ -1007,7 +1011,7 @@ class RestPipe:
     def step7(self):
         self.step7a()
         self.step7b()
-        
+
     #do the parcellation
     def step7a(self):
         logging.info('starting parcellation')
@@ -1034,7 +1038,7 @@ class RestPipe:
         if self.corrts != None:
             corrtxt = self.corrts
 
-        if os.path.isfile(corrtxt):        
+        if os.path.isfile(corrtxt):
             timeseries = np.loadtxt(corrtxt,unpack=True)
             if not self.needfunc:
                 self.tdim = timeseries.shape[1]
@@ -1042,16 +1046,16 @@ class RestPipe:
                 timeseries = self.scrub_motion_volumes(timeseries)
             myres = np.corrcoef(timeseries)
             myres = np.nan_to_num(myres)
-            
+
             #convert corcoef
             zrmaps = 0.5*np.log((1+myres)/(1-myres))
             #find the inf vals on diagonal
             infs = (zrmaps == np.inf).nonzero()
 
-            #replace the infs with 0            
+            #replace the infs with 0
             for idx in range(len(infs[0])):
                 zrmaps[infs[0][idx]][infs[1][idx]] = 0
-            
+
             nibabel.save(nibabel.Nifti1Image(myres,None) ,rmat)
             nibabel.save(nibabel.Nifti1Image(zrmaps,None) ,zmat)
             np.savetxt(ztxt,zrmaps,fmt='%f',delimiter=',')
@@ -1070,12 +1074,12 @@ class RestPipe:
 
             labels = self.grab_labels()
             aalcenter = np.array(self.refac.split(','),dtype=int)
-            
+
             labnii = nibabel.load(self.corrlabel)
             niidata = labnii.get_data()
             niihdr = labnii.get_header()
             zooms = np.array(niihdr.get_zooms())
-            
+
             G=nx.Graph(atlas=str(self.corrlabel))
             for lab in labels:
                 #grab indices equal to label value
@@ -1089,7 +1093,7 @@ class RestPipe:
                 G.node[lab[0]]['timecourse'] = str(timecourse.tolist()).replace(',','').strip('\[\]')
 
 
-            sigx,sigy = (zrmaps != 0 ).nonzero()            
+            sigx,sigy = (zrmaps != 0 ).nonzero()
             for idx in range(len(sigx)):
                 if sigx[idx] < sigy[idx]:
                     zrval = str(zrmaps[sigx[idx]][sigy[idx]])
@@ -1110,8 +1114,8 @@ class RestPipe:
                     logging.info('correlation matrix finished : ' + fname)
                 else:
                     logging.info('correlation failed')
-                    raise SystemExit()                
-        else:            
+                    raise SystemExit()
+        else:
             logging.info('could not find mean timeseries matrix file "%s"', corrtxt)
             raise SystemExit()
 
@@ -1129,7 +1133,7 @@ class RestPipe:
         if mask.shape != data.shape[:-1]:
             logging.info('data and mask are different shapes!')
             raise SystemExit()
-               
+
         logging.info("running %s, masked by %s, at pearsonr value of %f" % (self.thisnii, self.refgm, self.fcdmthresh))
         outfile = fcdm.fcdm(self.thisnii, self.refgm, self.fcdmthresh)
 
@@ -1224,15 +1228,12 @@ class RestPipe:
                       for excludethis in xrange(contributor - self.dvarsnumneighbors, contributor + self.dvarsnumneighbors + 1)
                       if excludethis < data.shape[3]
                      ]))
-            logging.info(' marking these volumes due to DVARS > %g: %s', _dvarsthreshold * boldscaling, excludethese)            
+            logging.info(' marking these volumes due to DVARS > %g: %s', _dvarsthreshold * boldscaling, excludethese)
             for excludethis in excludethese:
                 numexcls[excludethis] += 1
-            #with open(dvarsmarkedvolstxt, 'w') as f:
-            f = open(dvarsmarkedvolstxt, 'w')
-            f.write("# these are the volumes (indexed starting at 0) marked as exceeding the 'DVARS' threshold of %s\n" % self.dvarsthreshold)
-            np.savetxt(f, np.transpose(numpy.array(excludethese)), fmt='%d', newline=' ')
-            f.close()
-            
+            with open(dvarsmarkedvolstxt, 'w') as f:
+                f.write("# these are the volumes (indexed starting at 0) marked as exceeding the 'DVARS' threshold of %s\n" % self.dvarsthreshold)
+                np.savetxt(f, np.transpose(numpy.array(excludethese)), fmt='%d', newline=' ')
             np.savetxt(dvarstxt, dvars, fmt='%g')
             np.savetxt(dvarspercenttxt, dvars / boldscaling, fmt='%g')
             np.savetxt(dvarsthreshtxt, [_dvarsthreshold * boldscaling], fmt='%f')
@@ -1260,14 +1261,12 @@ class RestPipe:
                       for excludethis in xrange(contributor - self.fdnumneighbors, contributor + self.fdnumneighbors + 1)
                       if excludethis < data.shape[3]
                      ]))
-            logging.info(' marking these volumes due to FD > %g mm: %s', self.fdthreshold, excludethese)            
+            logging.info(' marking these volumes due to FD > %g mm: %s', self.fdthreshold, excludethese)
             for excludethis in excludethese:
                 numexcls[excludethis] += 1
-            #with open(fdmarkedvolstxt, 'w') as f:
-            f = open(fdmarkedvolstxt, 'w')
-            f.write("# these are the volumes (indexed starting at 0) marked as exceeding the 'FD' threshold of %g mm\n" % self.fdthreshold)
-            np.savetxt(f, np.transpose(numpy.array(excludethese)), fmt='%d', newline=' ')
-            f.close()
+            with open(fdmarkedvolstxt, 'w') as f:
+                f.write("# these are the volumes (indexed starting at 0) marked as exceeding the 'FD' threshold of %g mm\n" % self.fdthreshold)
+                np.savetxt(f, np.transpose(numpy.array(excludethese)), fmt='%d', newline=' ')
             np.savetxt(fdtxt, FD, fmt='%g')
 
         if self.motionthreshold != None:
@@ -1361,7 +1360,7 @@ class RestPipe:
                 # of the displacement caused by the rotation, and then add
                 # this to the translation vector.  This gives us the
                 # maximum displacement.
-            
+
                 u2scaled = np.array([0, 0, 0])
                 if qcomb_s * qcomb_s != 1:
                     # there is rotation.
@@ -1400,11 +1399,9 @@ class RestPipe:
             logging.info(' marking these volumes due to motion > %g mm: %s', self.motionthreshold, excludethese)
             for excludethis in excludethese:
                 numexcls[excludethis] += 1
-            #with open(motionmarkedvolstxt, 'w') as f:
-            f = open(motionmarkedvolstxt, 'w')
-            f.write("# these are the volumes (indexed starting at 0) marked as exceeding the 'motion' threshold of %g\n" % self.motionthreshold)
-            np.savetxt(f, numpy.array(excludethese)[:,np.newaxis], fmt='%d', newline=' ')
-            f.close()
+            with open(motionmarkedvolstxt, 'w') as f:
+                f.write("# these are the volumes (indexed starting at 0) marked as exceeding the 'motion' threshold of %g\n" % self.motionthreshold)
+                np.savetxt(f, numpy.array(excludethese)[:,np.newaxis], fmt='%d', newline=' ')
             np.savetxt(motiontxt, maxdisplacements, fmt='%g')
 
         if self.scrubop == 'and':
@@ -1427,12 +1424,9 @@ class RestPipe:
                 ([], ["'FD'"])[self.fdthreshold is not None] +
                 ([], ["'motion'"])[self.motionthreshold is not None])
             logging.info('Scrubbed the following volumes because they or their neighbors exceeded the %s threshold (first volume is 0): %s' % (scrubmethodstr, str(excludedinds[0])))
-            #with open(excludedvolstxt, 'w') as f:
-            f = open(excludedvolstxt, 'w')
-            f.write("# these are the volumes (indexed starting at 0) excluded because they or their neighbors exceeded the %s threshold\n" % scrubmethodstr)
-            np.savetxt(f, np.transpose(excludedinds[0]), fmt='%d', newline=' ')
-            f.close()
-
+            with open(excludedvolstxt, 'w') as f:
+                f.write("# these are the volumes (indexed starting at 0) excluded because they or their neighbors exceeded the %s threshold\n" % scrubmethodstr)
+                np.savetxt(f, np.transpose(excludedinds[0]), fmt='%d', newline=' ')
         if self.scrubkeepminvols != None and timeseries.shape[1] < self.scrubkeepminvols:
             logging.error('Too few volumes (%d) met the scrubbing threshold!  Exiting...' % (timeseries.shape[1],))
             raise SystemExit()
