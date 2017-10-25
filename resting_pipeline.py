@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/bin/env python2.7
 # -*- coding: iso-8859-1 -*-
 
 import numpy as np
@@ -681,7 +681,7 @@ class RestPipe:
                 X.append(np.vstack([np.ones(self.tdim), params[index]]).T)
 
             logging.info('starting linear regression')
-            tmp_mean = np.mean(data1, axis=3)
+            tmp_mean = np.mean(data1, axis=3, dtype=data1.dtype)
             shape = data1.shape
             data1v = data1.reshape((shape[0]*shape[1], shape[2], shape[3])).transpose((1, 2, 0))
             # data1v is a view in z, t, x*y order
@@ -700,7 +700,7 @@ class RestPipe:
             # in-place (-=, *=) operations should save memory
             data_mr += tmp_mean.reshape(tmp_mean.shape + (1,))
             data_mr -= np.min(data_mr)
-            data_mr *= 30000.0 / np.max(data_mr)
+            data_mr *= (30000.0 / np.max(data_mr)).astype(data.get_data_dtype())
             newNii = nibabel.Nifti1Pair(data_mr,None,data.get_header())
 
             newprefix = self.prefix + 'r'
@@ -901,7 +901,7 @@ class RestPipe:
         X_csf = np.vstack([np.ones(self.tdim), csf_ts]).T
 
         logging.info('starting linear regression')
-        tmp_mean = np.mean(data1, axis=3)
+        tmp_mean = np.mean(data1, axis=3, dtype=data1.dtype)
         shape = data1.shape
         data1v = data1.reshape((shape[0]*shape[1], shape[2], shape[3])).transpose((1, 2, 0))
         # data1v is a view in z, t, x*y order
@@ -923,7 +923,7 @@ class RestPipe:
         del data1
         data_mr += tmp_mean.reshape(tmp_mean.shape + (1,))
         data_mr -= np.min(data_mr)
-        data_mr *= 30000.0 / np.max(data_mr)
+        data_mr *= (30000.0 / np.max(data_mr)).astype(data.get_data_dtype())
         newNii = nibabel.Nifti1Pair(data_mr,None,data.get_header())
         nibabel.save(newNii,newfile)
 
@@ -971,20 +971,20 @@ class RestPipe:
         tmp[int((len1-tmpMA+tmpMA2)-1):int(len1+tmpMA2)]=tmpAB
         tmp[int((len2-tmpMA2)-1):int(len2+tmpMA-tmpMA2)]=tmpBA
 
-        tmp_mean = np.mean(data1, axis=3)
+        tmp_mean = np.mean(data1, axis=3, dtype=data1.dtype)
         # go slice-by-slice
         for cntz in range(self.zdim):
             tmp_data = data1[:,:,cntz,:]
-            arr_f = np.fft.fftshift(np.fft.fft(np.fft.fftshift(signal.detrend(tmp_data), axes=2), axis=2), axes=2)
+            arr_f = np.fft.fftshift(np.fft.fft(np.fft.fftshift(signal.detrend(tmp_data), axes=[2]), axis=2), axes=[2])
             arr_fc = np.multiply(arr_f, tmp.T)
-            yyy00 = np.real(np.fft.fftshift(np.fft.ifft(np.fft.fftshift(arr_fc, axes=2), axis=2), axes=2))
+            yyy00 = np.real(np.fft.fftshift(np.fft.ifft(np.fft.fftshift(arr_fc, axes=[2]), axis=2), axes=[2]))
             data1[:,:,cntz,:] = yyy00
         data_lowpass = data1
         del data1
         # in-place (-=, *=) operations should save memory
         data_lowpass += tmp_mean.reshape(tmp_mean.shape + (1,))
         data_lowpass -=  np.min(data_lowpass)
-        data_lowpass *= 30000.0 / np.max(data_lowpass)
+        data_lowpass *= (30000.0 / np.max(data_lowpass)).astype(data.get_data_dtype())
 
         newNii = nibabel.Nifti1Pair(data_lowpass,None,data.get_header())
         nibabel.save(newNii,newfile)
