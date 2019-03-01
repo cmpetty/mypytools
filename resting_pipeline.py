@@ -13,6 +13,7 @@ from optparse import OptionParser, OptionGroup
 import logging
 import math
 from scipy import ndimage as nd
+from shutil import copyfile
 
 logging.basicConfig(format='%(asctime)s %(message)s ', datefmt='%m/%d/%Y %I:%M:%S %p', level=logging.INFO)
 
@@ -76,7 +77,7 @@ parser.add_option("--scrubkeepminvols",  action="store", type="int", dest="scrub
 parser.add_option("--fcdmthresh",  action="store", type="float", dest="fcdmthresh",help="R-value threshold to be used in functional connectivity density mapping ( step8 ). Default is set to 0.6. Algorithm from Tomasi et al, PNAS(2010), vol. 107, no. 21. Calculates the fcdm of functional data from last completed step, inside a dilated gray matter mask", metavar="THRESH", default=0.6)
 parser.add_option("--cleanup",  action="store_true", dest="cleanup",help="delete files from intermediate steps?")
 
-print "Command-line: " + " ".join([repr(x) for x in sys.argv])
+print("Command-line: " + " ".join([repr(x) for x in sys.argv]))
 
 options, args = parser.parse_args()
 
@@ -90,7 +91,7 @@ if '-h' in sys.argv:
 
     raise SystemExit()
 if not (options.funcfile) or '-help' in sys.argv:
-    print "Input file ( --func ) is required to begin. Try --help "
+    print("Input file ( --func ) is required to begin. Try --help ")
     raise SystemExit()
 
 class RestPipe:
@@ -144,7 +145,7 @@ class RestPipe:
         self.thisnii = None
         if options.funcfile is not None and self.needfunc:
             if not ( os.path.isfile(options.funcfile)):
-                print "File does not exist: " + options.funcfile
+                print("File does not exist: " + options.funcfile)
                 raise SystemExit()
             else:
                 self.origbxh = str(options.funcfile)
@@ -154,7 +155,7 @@ class RestPipe:
         self.t1nii = None
         if options.anatfile is not None:
             if not ( os.path.isfile(options.anatfile)):
-                print "File does not exist: " + options.anatfile
+                print("File does not exist: " + options.anatfile)
                 raise SystemExit()
             else:
                 fileExt = os.path.splitext(options.anatfile)[-1]
@@ -208,10 +209,10 @@ class RestPipe:
             for fname in [options.refwm, options.refcsf, options.flirtref, options.refbrainmask]:
                 if fname is not None:
                     if not ( os.path.isfile(fname) ):
-                        print "File does not exist: " + fname
+                        print("File does not exist: " + fname)
                         raise SystemExit()
                 else:
-                    print "If using nonstandard reference, CSF and WM masks are required. Try --help"
+                    print("If using nonstandard reference, CSF and WM masks are required. Try --help")
                     raise SystemExit()
 
             logging.info('Using ' + options.refac + ' for AC point/centroid calculation')
@@ -256,10 +257,10 @@ class RestPipe:
             if options.corrtext is None:
                 raise SystemExit("If --corrlabel is specified, --corrtext must also be specified.")
             if not ( os.path.isfile(options.corrlabel) ):
-                print "File does not exist: " + options.corrlabel
+                print("File does not exist: " + options.corrlabel)
                 raise SystemExit()
             elif not ( os.path.isfile(options.corrtext) ):
-                print "File does not exist: " + options.corrtext
+                print("File does not exist: " + options.corrtext)
                 raise SystemExit()
             else:
                 self.corrlabel = str(options.corrlabel)
@@ -273,7 +274,7 @@ class RestPipe:
         #a pre-defined flirt matrix for normalization
         if options.flirtmat is not None:
             if not ( os.path.isfile(options.flirtmat) ):
-                print "File does not exist: " + options.flirtmat
+                print("File does not exist: " + options.flirtmat)
                 raise SystemExit()
             else:
                 self.flirtmat = str(options.flirtmat)
@@ -287,7 +288,11 @@ class RestPipe:
         self.betfval = options.betfval
         self.anatbetfval = options.anatbetfval
 
-        self.sliceorder = options.sliceorder
+        if options.sliceorder:
+            self.sliceorder = options.sliceorder
+            self.dosliceorder = True
+        else:
+            self.dosliceorder = False
 
         self.throwaway = options.throwaway
 
@@ -343,6 +348,7 @@ class RestPipe:
         #array for files to delete later
         self.toclean = []
         self.slicefile = None
+        self.doslicetiming = False
         #self.sliceorder = None
         self.xdim = None
         self.ydim = None
@@ -355,12 +361,30 @@ class RestPipe:
         #if these aren't defined by options they get default values
         for fname in [self.flirtref, self.refwm, self.refcsf, self.corrlabel]:
             if not os.path.isfile(fname):
-                print "File does not exist: " + fname
+                print("File does not exist: " + fname)
                 raise SystemExit()
+
+        #place to put temp stuff
+        if ( os.getenv('TMPDIR') ):
+            self.tmpdir = os.getenv('TMPDIR')
+        else:
+            self.tmpdir = '/tmp'
 
 
         #parse the bxh to get some values
         if self.origbxh is not None:
+            #first try to get slicetiming
+            try:
+                tempst = os.path.join(self.tmpdir,'slicetiming.txt')
+                popenobj = subprocess.Popen(['bxh_slicetiming','--fsl',self.origbxh,tempst], stdout=subprocess.PIPE)
+                (stdoutdata, stderrdata) = popenobj.communicate()
+                lines = stdoutdata.splitlines()
+                if os.path.isfile(tempst):
+                    self.slicefile = os.path.abspath(tempst)
+                    self.doslicetiming = True
+            except Exception as e:
+                logging.error("could not produce slicetiming, will try slice order")
+
             popenobj = subprocess.Popen(['dumpheader', self.origbxh], stdout=subprocess.PIPE)
             (stdoutdata, stderrdata) = popenobj.communicate()
             lines = stdoutdata.splitlines()
@@ -408,6 +432,7 @@ class RestPipe:
                 mobj = re.search("acqdata: sliceorder = (.*)", line)
                 if mobj:
                     (self.sliceorder,) = mobj.groups()
+                    self.dosliceorder = True
                 mobj = re.search(" Filename: (.*\.nii(\.gz)?)", line)
                 if mobj:
                     fname = mobj.group(1)
@@ -420,11 +445,11 @@ class RestPipe:
                     elif '0' in self.steps:
                         self.thisnii = None
                     else:
-                        print "Please provide a BXH that points to a NIFTI file: " + self.origbxh
+                        print("Please provide a BXH that points to a NIFTI file: " + self.origbxh)
                         raise SystemExit()
         else:
             if (self.thisnii is not None) and ( self.tr_ms is not None ):
-                thishdr = nibabel.load(self.thisnii).get_header()
+                thishdr = nibabel.load(self.thisnii).header
                 thisshape = thishdr.get_data_shape()
 
                 if len(thisshape) == 4:
@@ -448,12 +473,6 @@ class RestPipe:
             if not ( os.path.exists(self.outpath) ):
                 os.mkdir( self.outpath )
 
-        #place to put temp stuff
-        if ( os.getenv('TMPDIR') ):
-            self.tmpdir = os.getenv('TMPDIR')
-        else:
-            self.tmpdir = '/tmp'
-
         #if they are skipping 0, make sure there's NII data
         if '0' not in self.steps and self.needfunc:
             if self.thisnii is None:
@@ -476,7 +495,11 @@ class RestPipe:
 
         #try to determine sliceorder if step1
         if '1' in self.steps:
-            if re.search('\d+\,+',str(self.sliceorder)):
+            if self.doslicetiming and self.slicefile:
+                copyfile(self.slicefile,os.path.join(self.outpath,'slicetiming.txt'))
+                self.slicefile = os.path.join(self.outpath,'slicetiming.txt')
+                logging.info("using slicetiming.txt")
+            elif self.dosliceorder and re.search('\d+\,+',str(self.sliceorder)):
                 slicefile = os.path.join(self.outpath,'sliceorder.txt')
                 f = open(slicefile, 'w')
                 for i in self.sliceorder.split(','):
@@ -485,7 +508,7 @@ class RestPipe:
 
                 f.close()
                 self.slicefile = slicefile
-            elif options.sliceorder:
+            elif self.dosliceorder and options.sliceorder:
                 #try to generate a slicefile if it wasn't in BXH
                 if (re.search('(odd|even|up|down)',options.sliceorder)) and (self.slicefile is None):
                     self.sliceorder = options.sliceorder
@@ -548,13 +571,13 @@ class RestPipe:
             # otherwise look for default parcellation output file
             if options.corrts is not None:
                 if not os.path.isfile(options.corrts):
-                    print "File does not exist: " + options.corrts
+                    print("File does not exist: " + options.corrts)
                     raise SystemExit()
                 self.corrts = options.corrts
             else:
                 corrtsfile = os.path.join(self.outpath,'corrlabel_ts.txt')
                 if not os.path.isfile(corrtsfile):
-                    print "You are running step 7b by itself, but can't find default input file '%s'.  Please specify an alternate file with --corrts." % (corrtsfile,)
+                    print("You are running step 7b by itself, but can't find default input file '%s'.  Please specify an alternate file with --corrts." % (corrtsfile,))
                     raise SystemExit()
 
 
@@ -626,7 +649,17 @@ class RestPipe:
         newprefix = self.prefix + '_st'
         newfile = os.path.join(self.outpath,newprefix)
 
-        thisprocstr = str("slicetimer -i " + self.thisnii + " -o " + newfile + " -r " +  str(self.tr_ms/1000) + " --ocustom=" + self.slicefile)
+        #setup the type of file for slicetimer
+        fslst_type = None
+        if self.dosliceorder and self.slicefile:
+            fslst_type = " --ocustom="
+        elif self.doslicetiming and self.slicefile:
+            fslst_type = " --tcustom="
+        else:
+            logging.error('slice time correction does not have valid input')
+            raise SystemExit()
+
+        thisprocstr = str("slicetimer -i " + self.thisnii + " -o " + newfile + " -r " +  str(self.tr_ms/1000) + fslst_type + self.slicefile)
         logging.info('running: ' + thisprocstr)
         subprocess.Popen(thisprocstr,shell=True).wait()
 
@@ -689,7 +722,7 @@ class RestPipe:
             for cntz in range(self.zdim):
                 tmp_data = data1v[cntz]
                 for index in range(6):
-                    p0 = np.linalg.lstsq(X[index], tmp_data)[0]
+                    p0 = np.linalg.lstsq(X[index], tmp_data, rcond=-1)[0]
                     p00 = np.dot(X[index], p0) #product
                     tmp_data = tmp_data - p00
                 data1v[cntz] = tmp_data
@@ -701,7 +734,7 @@ class RestPipe:
             data_mr += tmp_mean.reshape(tmp_mean.shape + (1,))
             data_mr -= np.min(data_mr)
             data_mr *= (30000.0 / np.max(data_mr)).astype(data.get_data_dtype())
-            newNii = nibabel.Nifti1Pair(data_mr,None,data.get_header())
+            newNii = nibabel.Nifti1Pair(data_mr,None,data.header)
 
             newprefix = self.prefix + 'r'
             newfile = os.path.join(self.outpath, (newprefix + ".nii.gz"))
@@ -909,11 +942,11 @@ class RestPipe:
         for cntz in range(self.zdim):
             tmp_data = data1v[cntz]
             # regress wm
-            p01 = np.linalg.lstsq(X_wm, tmp_data)[0]
+            p01 = np.linalg.lstsq(X_wm, tmp_data, rcond=-1)[0]
             p001 = np.dot(X_wm, p01) #product
             tmp02 = tmp_data - p001
             # regress csf
-            p02 = np.linalg.lstsq(X_csf, tmp02)[0]
+            p02 = np.linalg.lstsq(X_csf, tmp02, rcond=-1)[0]
             p002 = np.dot(X_csf, p02) #product
             tmp03 = tmp02 - p002
             data1v[cntz] = tmp03
@@ -924,7 +957,7 @@ class RestPipe:
         data_mr += tmp_mean.reshape(tmp_mean.shape + (1,))
         data_mr -= np.min(data_mr)
         data_mr *= (30000.0 / np.max(data_mr)).astype(data.get_data_dtype())
-        newNii = nibabel.Nifti1Pair(data_mr,None,data.get_header())
+        newNii = nibabel.Nifti1Pair(data_mr,None,data.header)
         nibabel.save(newNii,newfile)
 
         if os.path.isfile(newfile):
@@ -986,7 +1019,7 @@ class RestPipe:
         data_lowpass -=  np.min(data_lowpass)
         data_lowpass *= (30000.0 / np.max(data_lowpass)).astype(data.get_data_dtype())
 
-        newNii = nibabel.Nifti1Pair(data_lowpass,None,data.get_header())
+        newNii = nibabel.Nifti1Pair(data_lowpass,None,data.header)
         nibabel.save(newNii,newfile)
 
         if os.path.isfile(newfile):
@@ -1077,7 +1110,7 @@ class RestPipe:
 
             labnii = nibabel.load(self.corrlabel)
             niidata = labnii.get_data()
-            niihdr = labnii.get_header()
+            niihdr = labnii.header
             zooms = np.array(niihdr.get_zooms())
 
             G=nx.Graph(atlas=str(self.corrlabel))
@@ -1433,7 +1466,7 @@ class RestPipe:
 
         # write out scrubbed image data (though we don't actually use it)
         scrubbeddata = datanifti.get_data()[:,:,:,np.array(selected)]
-        newNii = nibabel.Nifti1Pair(scrubbeddata,None,datanifti.get_header())
+        newNii = nibabel.Nifti1Pair(scrubbeddata,None,datanifti.header)
         nibabel.save(newNii,newfile)
 
         if os.path.isfile(newfile):
